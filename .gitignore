@@ -1,0 +1,11 @@
+
+venv/
+myenv/
+__pycache__/
+*.pyc
+.env
+.idea/
+.vscode/
+.pytest_cache/
+alembic/versions/*
+logs/

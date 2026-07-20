@@ -10,7 +10,7 @@ mysql_engine = create_async_engine(
     settings.mysql_url,
     echo=settings.DEBUG,
     future=True,
-    pool_pre_ping=True,
+    pool_pre_ping= False,
     pool_size=5,
     max_overflow=10,
 )

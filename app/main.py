@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.api.sync_routes import router as sync_router
+from app.api.resume_routes import router as resume_router
 from app.config import settings
 from app.config.logging import logger
 from app.workers.scheduler import start_scheduler, shutdown_scheduler
@@ -11,6 +12,7 @@ app = FastAPI(
 )
 
 app.include_router(sync_router)
+app.include_router(resume_router)
 
 
 @app.on_event("startup")

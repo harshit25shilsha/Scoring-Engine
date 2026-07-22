@@ -28,7 +28,6 @@ class S3Service:
 
     @staticmethod
     def _extract_key(resume_file_url: str) -> str:
-        # Confirmed format: https://ebench-development.s3.ap-south-1.amazonaws.com/<key>
         if resume_file_url.startswith("http"):
             return urlparse(resume_file_url).path.lstrip("/")
         return resume_file_url

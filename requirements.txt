@@ -36,3 +36,4 @@ apscheduler==3.11.0
 boto3==1.35.0
 pypdf==5.1.0
 docx2txt==0.8
+groq

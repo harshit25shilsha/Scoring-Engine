@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from app.utils.timezone_utils import to_mysql_naive
 from app.config.logging import logger
 from app.database.mysql import MySQLSessionLocal
 from app.database.postgres import PostgresSessionLocal
@@ -34,8 +35,9 @@ class JobSyncService:
             mysql_repo = MySQLJobRepo(mysql_db)
             pg_repo = PGJobRepo(pg_db)
             sync_repo = SyncRepository(pg_db)
-
             last_sync = await sync_repo.get_last_sync_time(ENTITY_NAME) or EPOCH
+            last_sync = to_mysql_naive(last_sync)
+
             start_time = datetime.now(timezone.utc)
 
             jobs = await mysql_repo.get_updated_since(last_sync)

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
 
     # Groq
     GROQ_API_KEY: str = ""
+    
+    MYSQL_TIMEZONE: str = "Asia/Kolkata"
 
     @property
     def postgres_url(self) -> str:

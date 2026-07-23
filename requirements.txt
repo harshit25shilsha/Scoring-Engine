@@ -37,3 +37,6 @@ boto3==1.35.0
 pypdf==5.1.0
 docx2txt==0.8
 groq
+
+pgvector==0.3.6
+sentence-transformers==3.3.1

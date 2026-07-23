@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.logging import logger
 from app.database.models import JobRaw, JobProcessed
+from app.embeddings.embedding_service import EmbeddingService
 from app.llm.jd_extractor import JDExtractor
 from app.parsers.text_cleaner import clean_text
 from app.utils.hashing import hash_text
@@ -15,6 +16,7 @@ class JobProcessingService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.extractor = JDExtractor()
+        self.embedder = EmbeddingService()
 
     async def process_job(self, job_id: int) -> dict:
         job = await self.db.get(JobRaw, job_id)
@@ -42,10 +44,18 @@ class JobProcessingService:
             structured_error = str(e)
             logger.error(f"[groq] JD structuring failed for job={job_id}: {e}")
 
+        embedding_vector = None
+        if structured:
+            try:
+                embedding_vector = self.embedder.generate(cleaned)
+            except Exception as e:
+                logger.error(f"[embeddings] failed for job={job_id}: {e}")
+
         await self._store_result(
             job_id=job_id,
             cleaned_jd=cleaned,
             structured_json=json.dumps(structured) if structured else None,
+            embedding=embedding_vector,
             jd_hash=content_hash,
             parse_status="STRUCTURED" if structured else "PARSED_ONLY",
             parse_error=structured_error,
@@ -54,20 +64,28 @@ class JobProcessingService:
         if structured:
             await self._mark_job_processed(job_id, True)
 
-        logger.info(f"[job] job={job_id} processed, structured={bool(structured)}")
+        logger.info(
+            f"[job] job={job_id} processed, "
+            f"structured={bool(structured)}, embedded={bool(embedding_vector)}"
+        )
         return {
             "job_id": job_id,
             "status": "structured" if structured else "parsed_only",
             "text_length": len(cleaned),
+            "embedded": bool(embedding_vector),
         }
 
-    async def _store_result(self, job_id, cleaned_jd, structured_json, jd_hash, parse_status, parse_error):
+    async def _store_result(
+        self, job_id, cleaned_jd, structured_json, embedding,
+        jd_hash, parse_status, parse_error
+    ):
         existing = await self.db.get(JobProcessed, job_id)
         now = datetime.now(timezone.utc)
 
         if existing:
             existing.cleaned_jd = cleaned_jd
             existing.structured_json = structured_json
+            existing.embedding = embedding
             existing.jd_hash = jd_hash
             existing.parse_status = parse_status
             existing.parse_error = parse_error
@@ -77,6 +95,7 @@ class JobProcessingService:
                 job_id=job_id,
                 cleaned_jd=cleaned_jd,
                 structured_json=structured_json,
+                embedding=embedding,
                 jd_hash=jd_hash,
                 parse_status=parse_status,
                 parse_error=parse_error,

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.logging import logger
 from app.database.models import CandidateRaw, ResumeProcessed
+from app.embeddings.embedding_service import EmbeddingService
 from app.llm.resume_extractor import ResumeExtractor
 from app.parsers.resume_parser import extract_text, UnsupportedResumeFormat
 from app.parsers.text_cleaner import clean_text
@@ -18,6 +19,7 @@ class ResumeProcessingService:
         self.db = db
         self.s3 = S3Service()
         self.extractor = ResumeExtractor()
+        self.embedder = EmbeddingService()
 
     async def process_candidate(self, candidate_id: int) -> dict:
         candidate = await self.db.get(CandidateRaw, candidate_id)
@@ -48,22 +50,36 @@ class ResumeProcessingService:
                 structured_error = str(e)
                 logger.error(f"[groq] structuring failed for candidate={candidate_id}: {e}")
 
+            embedding_vector = None
+            if structured:
+                try:
+                    embedding_vector = self.embedder.generate(cleaned)
+                except Exception as e:
+                    logger.error(f"[embeddings] failed for candidate={candidate_id}: {e}")
+                    
+            
             await self._store_result(
                 candidate_id=candidate_id,
                 resume_text=raw_text,
                 cleaned_text=cleaned,
                 structured_json=json.dumps(structured) if structured else None,
+                embedding=embedding_vector,
                 resume_hash=content_hash,
                 parse_status="STRUCTURED" if structured else "PARSED_ONLY",
                 parse_error=structured_error,
             )
             await self._mark_candidate_processed(candidate_id, True)
+            
+            logger.info(
+                f"[resume] candidate={candidate_id} processed, "
+                f"structured={bool(structured)}, embedded={bool(embedding_vector)}"
+            )
 
-            logger.info(f"[resume] candidate={candidate_id} processed, structured={bool(structured)}")
             return {
                 "candidate_id": candidate_id,
                 "status": "structured" if structured else "parsed_only",
                 "text_length": len(cleaned),
+                "embedded": bool(embedding_vector),
             }
 
         except UnsupportedResumeFormat as e:
@@ -72,6 +88,7 @@ class ResumeProcessingService:
                 resume_text=None,
                 cleaned_text=None,
                 structured_json=None,
+                embedding=None,
                 resume_hash=None,
                 parse_status="UNSUPPORTED_FORMAT",
                 parse_error=str(e),
@@ -85,16 +102,18 @@ class ResumeProcessingService:
                 resume_text=None,
                 cleaned_text=None,
                 structured_json=None,
+                embedding=None,
                 resume_hash=None,
                 parse_status="FAILED",
                 parse_error=str(e),
             )
+            
             logger.error(f"[resume] candidate={candidate_id} failed: {e}")
             return {"candidate_id": candidate_id, "status": "failed", "error": str(e)}
 
     async def _store_result(
         self, candidate_id, resume_text, cleaned_text, structured_json,
-        resume_hash, parse_status, parse_error
+        embedding, resume_hash, parse_status, parse_error
     ):
         existing = await self.db.get(ResumeProcessed, candidate_id)
         now = datetime.now(timezone.utc)
@@ -103,6 +122,7 @@ class ResumeProcessingService:
             existing.resume_text = resume_text
             existing.cleaned_text = cleaned_text
             existing.structured_json = structured_json
+            existing.embedding=embedding
             existing.resume_hash = resume_hash
             existing.parse_status = parse_status
             existing.parse_error = parse_error
@@ -113,6 +133,7 @@ class ResumeProcessingService:
                 resume_text=resume_text,
                 cleaned_text=cleaned_text,
                 structured_json=structured_json,
+                embedding=embedding,
                 resume_hash=resume_hash,
                 parse_status=parse_status,
                 parse_error=parse_error,

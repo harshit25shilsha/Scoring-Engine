@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     
     MYSQL_TIMEZONE: str = "Asia/Kolkata"
+    
+    # Embedding
+    
+    EMBEDDING_MODEL_NAME: str =""
+    EMBEDDINGS_DIMENSIONS: int = 384
+    
 
     @property
     def postgres_url(self) -> str:

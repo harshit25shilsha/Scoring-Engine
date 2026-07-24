@@ -6,6 +6,9 @@ from app.config import settings
 from app.config.logging import logger
 from app.workers.scheduler import start_scheduler, shutdown_scheduler
 from app.api.job_routes import router as job_router
+from app.api.score_routes import router as score_router
+
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
@@ -14,7 +17,7 @@ app = FastAPI(
 app.include_router(sync_router)
 app.include_router(resume_router)
 app.include_router(job_router)
-
+app.include_router(score_router)
 
 @app.on_event("startup")
 async def on_startup():

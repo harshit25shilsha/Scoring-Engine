@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_NAME: str =""
     EMBEDDINGS_DIMENSIONS: int = 384
     
+    GROQ_BATCH_DELAY_SECONDS: float
+    
+    SKILLS_WEIGHT: float
+    EXPERIENCE_WEIGHT: float
+    EDUCATION_WEIGHT: float
+    LOCATION_WEIGHT: float
 
     @property
     def postgres_url(self) -> str:

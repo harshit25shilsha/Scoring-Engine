@@ -8,15 +8,21 @@ class UnsupportedResumeFormat(Exception):
     pass
 
 
+def _strip_null_bytes(text: str) -> str:
+    return text.replace("\x00", "") if text else text
+
+
 def extract_text(file_bytes: bytes, file_name: str) -> str:
     ext = file_name.lower().rsplit(".", 1)[-1]
 
     if ext == "pdf":
-        return _extract_pdf(file_bytes)
+        raw = _extract_pdf(file_bytes)
     elif ext == "docx":
-        return _extract_docx(file_bytes)
+        raw = _extract_docx(file_bytes)
     else:
         raise UnsupportedResumeFormat(f"Unsupported format '{ext}' for {file_name}")
+
+    return _strip_null_bytes(raw)
 
 
 def _extract_pdf(file_bytes: bytes) -> str:

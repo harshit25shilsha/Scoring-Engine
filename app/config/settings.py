@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     EXPERIENCE_WEIGHT: float
     EDUCATION_WEIGHT: float
     LOCATION_WEIGHT: float
+    RULE_SCORE_WEIGHT: float
+    SEMANTIC_SCORE_WEIGHT: float
 
     @property
     def postgres_url(self) -> str:

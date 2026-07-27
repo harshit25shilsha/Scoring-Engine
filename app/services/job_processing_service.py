@@ -32,6 +32,7 @@ class JobProcessingService:
         existing = await self.db.get(JobProcessed, job_id)
         if existing and existing.jd_hash == content_hash:
             logger.info(f"[job] job={job_id} unchanged, skipping")
+            await self._mark_job_processed(job_id, True)
             return {"job_id": job_id, "status": "unchanged"}
 
         cleaned = clean_text(job.job_description)

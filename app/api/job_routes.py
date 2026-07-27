@@ -16,6 +16,15 @@ async def process_job_batch(
     return await service.process_all_jobs()
 
 
+@router.post("/retry-failed")
+async def retry_failed_jobs(
+    db: AsyncSession = Depends(get_postgres_session),
+):
+    service = BatchProcessingService(db)
+    return await service.retry_failed_job_structuring()
+
+
+
 @router.post("/{job_id}")
 async def process_job(
     job_id: int,

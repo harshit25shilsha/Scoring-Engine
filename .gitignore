@@ -10,4 +10,4 @@ __pycache__/
 alembic/versions/*
 logs/
 document.md
-tests\
+tests/

@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     LOCATION_WEIGHT: float
     RULE_SCORE_WEIGHT: float
     SEMANTIC_SCORE_WEIGHT: float
+    AUTO_PROCESSING_INTERVAL_MINUTES: int
+    
+    AUTO_SCORING_INTERVAL_MINUTES: int
+    MAX_JOBS_PER_SCORING_CYCLE: int
 
     @property
     def postgres_url(self) -> str:

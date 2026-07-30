@@ -1,5 +1,6 @@
-from sqlalchemy import select, exists
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from app.config import settings
 from app.config.logging import logger
@@ -17,32 +18,35 @@ class AutoScoringService:
         self.final_service = FinalScoringService(db)
 
     async def find_jobs_needing_scoring(self, limit: int) -> list[int]:
-        
-        result = await self.db.execute(
-            select(JobRaw.job_id).where(JobRaw.jd_processed.is_(True))
-        )
-        all_ready_job_ids = [row[0] for row in result.all()]
+        query = text("""
+            SELECT jr.job_id,
+                   COALESCE(unscored.remaining, 0) + COALESCE(never_scored.missing, 0) AS total_remaining
+            FROM jobs_raw jr
+            LEFT JOIN (
+                SELECT job_id, COUNT(*) AS remaining
+                FROM candidate_job_scores
+                WHERE overall_score IS NULL
+                GROUP BY job_id
+            ) unscored ON unscored.job_id = jr.job_id
+            LEFT JOIN (
+                SELECT jr2.job_id, COUNT(rp.candidate_id) AS missing
+                FROM jobs_raw jr2
+                CROSS JOIN resume_processed rp
+                WHERE rp.structured_json IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM candidate_job_scores cjs
+                      WHERE cjs.job_id = jr2.job_id AND cjs.candidate_id = rp.candidate_id
+                  )
+                GROUP BY jr2.job_id
+            ) never_scored ON never_scored.job_id = jr.job_id
+            WHERE jr.jd_processed = true
+              AND (COALESCE(unscored.remaining, 0) + COALESCE(never_scored.missing, 0)) > 0
+            ORDER BY total_remaining ASC
+            LIMIT :limit
+        """)
+        result = await self.db.execute(query, {"limit": limit})
+        return [row[0] for row in result.all()]
 
-        pending_job_ids = []
-        for job_id in all_ready_job_ids:
-            has_unscored = await self.db.execute(
-                select(
-                    exists().where(
-                        ResumeProcessed.structured_json.is_not(None),
-                        ~exists().where(
-                            CandidateJobScore.candidate_id == ResumeProcessed.candidate_id,
-                            CandidateJobScore.job_id == job_id,
-                            CandidateJobScore.overall_score.is_not(None),
-                        ),
-                    )
-                )
-            )
-            if has_unscored.scalar():
-                pending_job_ids.append(job_id)
-            if len(pending_job_ids) >= limit:
-                break
-
-        return pending_job_ids
 
     async def run_scoring_cycle(self) -> dict:
         job_ids = await self.find_jobs_needing_scoring(settings.MAX_JOBS_PER_SCORING_CYCLE)
@@ -51,7 +55,7 @@ class AutoScoringService:
             logger.info("[auto-score] no jobs pending scoring this cycle")
             return {"jobs_processed": 0, "details": []}
 
-        logger.info(f"[auto-score] cycle processing jobs: {job_ids}")
+        logger.info(f"[auto-score] cycle processing jobs (fewest remaining first): {job_ids}")
 
         details = []
         for job_id in job_ids:
@@ -74,4 +78,3 @@ class AutoScoringService:
                 details.append({"job_id": job_id, "error": str(e)})
 
         return {"jobs_processed": len(job_ids), "details": details}
-    

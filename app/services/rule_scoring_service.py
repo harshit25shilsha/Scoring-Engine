@@ -12,6 +12,7 @@ from app.database.models import (
 from app.scoring.rule_engine import (
     score_skills, score_experience, score_education, score_location,
 )
+from app.scoring.similarity import cosine_similarity, similarity_to_percentage
 
 
 class RuleScoringService:
@@ -35,24 +36,26 @@ class RuleScoringService:
         scored, skipped = 0, 0
 
         for resume in resumes:
+            candidate_id_for_log = resume.candidate_id
             candidate_raw = await self.db.get(CandidateRaw, resume.candidate_id)
             if candidate_raw is None:
                 skipped += 1
                 continue
 
             try:
-                await self._score_pair(candidate_raw, resume, job_raw, job_structured)
+                await self._score_pair(candidate_raw, resume, job_raw, job_processed, job_structured)
                 scored += 1
             except Exception as e:
+                await self.db.rollback()
                 logger.error(
-                    f"[rule-score] candidate={resume.candidate_id} job={job_id} failed: {e}"
+                    f"[rule-score] candidate={candidate_id_for_log} job={job_id} failed: {e}"
                 )
                 skipped += 1
 
         logger.info(f"[rule-score] job={job_id} scored={scored} skipped={skipped}")
         return {"job_id": job_id, "status": "completed", "scored": scored, "skipped": skipped}
 
-    async def _score_pair(self, candidate_raw, resume, job_raw, job_structured):
+    async def _score_pair(self, candidate_raw, resume, job_raw, job_processed, job_structured):
         candidate_structured = json.loads(resume.structured_json)
 
         skills_result = score_skills(
@@ -89,6 +92,11 @@ class RuleScoringService:
             + loc_score * settings.LOCATION_WEIGHT
         )
 
+        embedding_sim_pct = None
+        if resume.embedding is not None and job_processed.embedding is not None:
+            raw_similarity = cosine_similarity(resume.embedding, job_processed.embedding)
+            embedding_sim_pct = similarity_to_percentage(raw_similarity)
+
         await self._upsert_score(
             candidate_id=candidate_raw.candidate_id,
             job_id=job_raw.job_id,
@@ -97,6 +105,7 @@ class RuleScoringService:
             experience_score=exp_score,
             education_score=edu_score,
             location_score=loc_score,
+            embedding_similarity=embedding_sim_pct,
             matched_skills=skills_result["matched"],
             missing_skills=skills_result["missing"],
         )
@@ -104,7 +113,7 @@ class RuleScoringService:
     async def _upsert_score(
         self, candidate_id, job_id, rule_score, skills_score,
         experience_score, education_score, location_score,
-        matched_skills, missing_skills,
+        embedding_similarity, matched_skills, missing_skills,
     ):
         result = await self.db.execute(
             select(CandidateJobScore).where(
@@ -121,6 +130,7 @@ class RuleScoringService:
             existing.experience_score = experience_score
             existing.education_score = education_score
             existing.location_score = location_score
+            existing.embedding_similarity = embedding_similarity
             existing.matched_skills = json.dumps(matched_skills)
             existing.missing_skills = json.dumps(missing_skills)
             existing.generated_at = now
@@ -133,6 +143,7 @@ class RuleScoringService:
                 experience_score=experience_score,
                 education_score=education_score,
                 location_score=location_score,
+                embedding_similarity=embedding_similarity,
                 matched_skills=json.dumps(matched_skills),
                 missing_skills=json.dumps(missing_skills),
                 generated_at=now,

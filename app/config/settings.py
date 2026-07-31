@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     
     AUTO_SCORING_INTERVAL_MINUTES: int
     MAX_JOBS_PER_SCORING_CYCLE: int
+    
+    SEMANTIC_REVIEW_TOP_N_PER_JOB: int
+    SEMANTIC_REVIEW_MIN_RULE_SCORE: float
 
     @property
     def postgres_url(self) -> str:

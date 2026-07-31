@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, Float, Text, DateTime
+from sqlalchemy import Integer, Float, Text, DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -15,7 +15,8 @@ class CandidateJobScore(Base):
     overall_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     rule_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     semantic_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-
+    embedding_similarity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    
     skills_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     experience_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     education_score: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -28,4 +29,6 @@ class CandidateJobScore(Base):
     weaknesses: Mapped[str | None] = mapped_column(Text, nullable=True)
     recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    llm_reviewed: Mapped[bool] = mapped_column(Boolean ,default= False)
+    
     generated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -33,11 +33,19 @@ class RuleScoringService:
         )
         resumes = result.scalars().all()
 
+        # Bulk-fetch every candidate in ONE query instead of one query per candidate (N+1 fix)
+        candidate_ids = [r.candidate_id for r in resumes]
+        candidates_result = await self.db.execute(
+            select(CandidateRaw).where(CandidateRaw.candidate_id.in_(candidate_ids))
+        )
+        candidates_by_id = {c.candidate_id: c for c in candidates_result.scalars().all()}
+
         scored, skipped = 0, 0
 
         for resume in resumes:
             candidate_id_for_log = resume.candidate_id
-            candidate_raw = await self.db.get(CandidateRaw, resume.candidate_id)
+            candidate_raw = candidates_by_id.get(resume.candidate_id)
+
             if candidate_raw is None:
                 skipped += 1
                 continue

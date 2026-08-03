@@ -9,6 +9,7 @@ from app.api.job_routes import router as job_router
 from app.api.score_routes import router as score_router
 from app.api.candidate_routes import router as candidate_router
 from app.api.job_read_routes import router as job_read_router
+from app.api.embedding_routes import router as embedding_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -21,7 +22,7 @@ app.include_router(job_router)
 app.include_router(score_router)
 app.include_router(candidate_router)
 app.include_router(job_read_router)
-
+app.include_router(embedding_router)
 @app.on_event("startup")
 async def on_startup():
     logger.info(f"{settings.APP_NAME} started in {settings.APP_ENV} mode")

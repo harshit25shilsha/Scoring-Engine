@@ -21,6 +21,71 @@ class ResumeProcessingService:
         self.extractor = ResumeExtractor()
         self.embedder = EmbeddingService()
 
+    # ---------- Phase 1: I/O-bound, safe to run concurrently (no Groq) ----------
+
+    def fetch_and_clean_sync(self, resume_file_url: str, resume_file_name: str) -> dict:
+        """
+        Blocking: S3 download + text extraction + cleaning.
+        Call via asyncio.to_thread() for concurrent execution across candidates.
+        Raises UnsupportedResumeFormat or generic Exception on failure.
+        """
+        file_bytes = self.s3.download_file(resume_file_url)
+        content_hash = hash_content(file_bytes)
+        raw_text = extract_text(file_bytes, resume_file_name)
+        cleaned = clean_text(raw_text)
+        return {"raw_text": raw_text, "cleaned_text": cleaned, "content_hash": content_hash}
+
+    # ---------- Phase 2: Groq-dependent, must stay serialized/rate-limited ----------
+
+    async def structure_and_store(
+        self, candidate_id: int, raw_text: str, cleaned: str, content_hash: str
+    ) -> dict:
+        existing = await self.db.get(ResumeProcessed, candidate_id)
+        if existing and existing.resume_hash == content_hash:
+            logger.info(f"[resume] candidate={candidate_id} unchanged, skipping")
+            await self._mark_candidate_processed(candidate_id, True)
+            return {"candidate_id": candidate_id, "status": "unchanged"}
+
+        structured = None
+        structured_error = None
+        try:
+            structured = self.extractor.extract(cleaned)
+        except Exception as e:
+            structured_error = str(e)
+            logger.error(f"[groq] structuring failed for candidate={candidate_id}: {e}")
+
+        embedding_vector = None
+        if structured:
+            try:
+                embedding_vector = self.embedder.generate(cleaned)
+            except Exception as e:
+                logger.error(f"[embeddings] failed for candidate={candidate_id}: {e}")
+
+        await self._store_result(
+            candidate_id=candidate_id,
+            resume_text=raw_text,
+            cleaned_text=cleaned,
+            structured_json=json.dumps(structured) if structured else None,
+            embedding=embedding_vector,
+            resume_hash=content_hash,
+            parse_status="STRUCTURED" if structured else "PARSED_ONLY",
+            parse_error=structured_error,
+        )
+        await self._mark_candidate_processed(candidate_id, True)
+
+        logger.info(
+            f"[resume] candidate={candidate_id} processed, "
+            f"structured={bool(structured)}, embedded={bool(embedding_vector)}"
+        )
+        return {
+            "candidate_id": candidate_id,
+            "status": "structured" if structured else "parsed_only",
+            "text_length": len(cleaned),
+            "embedded": bool(embedding_vector),
+        }
+
+    # ---------- Original single-record entry point (used by API + unchanged) ----------
+
     async def process_candidate(self, candidate_id: int) -> dict:
         candidate = await self.db.get(CandidateRaw, candidate_id)
 
@@ -31,81 +96,25 @@ class ResumeProcessingService:
             return {"candidate_id": candidate_id, "status": "no_resume"}
 
         try:
-            file_bytes = self.s3.download_file(candidate.resume_file_url)
-            content_hash = hash_content(file_bytes)
-
-            existing = await self.db.get(ResumeProcessed, candidate_id)
-            if existing and existing.resume_hash == content_hash:
-                logger.info(f"[resume] candidate={candidate_id} unchanged, skipping")
-                await self._mark_candidate_processed(candidate_id, True)
-                return {"candidate_id": candidate_id, "status": "unchanged"}
-
-            raw_text = extract_text(file_bytes, candidate.resume_file_name)
-            cleaned = clean_text(raw_text)
-
-            structured = None
-            structured_error = None
-            try:
-                structured = self.extractor.extract(cleaned)
-            except Exception as e:
-                structured_error = str(e)
-                logger.error(f"[groq] structuring failed for candidate={candidate_id}: {e}")
-
-            embedding_vector = None
-            if structured:
-                try:
-                    embedding_vector = self.embedder.generate(cleaned)
-                except Exception as e:
-                    logger.error(f"[embeddings] failed for candidate={candidate_id}: {e}")
-
-            await self._store_result(
-                candidate_id=candidate_id,
-                resume_text=raw_text,
-                cleaned_text=cleaned,
-                structured_json=json.dumps(structured) if structured else None,
-                embedding=embedding_vector,
-                resume_hash=content_hash,
-                parse_status="STRUCTURED" if structured else "PARSED_ONLY",
-                parse_error=structured_error,
+            fetched = self.fetch_and_clean_sync(candidate.resume_file_url, candidate.resume_file_name)
+            return await self.structure_and_store(
+                candidate_id, fetched["raw_text"], fetched["cleaned_text"], fetched["content_hash"]
             )
-            await self._mark_candidate_processed(candidate_id, True)
-
-            logger.info(
-                f"[resume] candidate={candidate_id} processed, "
-                f"structured={bool(structured)}, embedded={bool(embedding_vector)}"
-            )
-
-            return {
-                "candidate_id": candidate_id,
-                "status": "structured" if structured else "parsed_only",
-                "text_length": len(cleaned),
-                "embedded": bool(embedding_vector),
-            }
 
         except UnsupportedResumeFormat as e:
             await self._store_result(
-                candidate_id=candidate_id,
-                resume_text=None,
-                cleaned_text=None,
-                structured_json=None,
-                embedding=None,
-                resume_hash=None,
-                parse_status="UNSUPPORTED_FORMAT",
-                parse_error=str(e),
+                candidate_id=candidate_id, resume_text=None, cleaned_text=None,
+                structured_json=None, embedding=None, resume_hash=None,
+                parse_status="UNSUPPORTED_FORMAT", parse_error=str(e),
             )
             logger.warning(f"[resume] candidate={candidate_id} unsupported format: {e}")
             return {"candidate_id": candidate_id, "status": "unsupported_format"}
 
         except Exception as e:
             await self._store_result(
-                candidate_id=candidate_id,
-                resume_text=None,
-                cleaned_text=None,
-                structured_json=None,
-                embedding=None,
-                resume_hash=None,
-                parse_status="FAILED",
-                parse_error=str(e),
+                candidate_id=candidate_id, resume_text=None, cleaned_text=None,
+                structured_json=None, embedding=None, resume_hash=None,
+                parse_status="FAILED", parse_error=str(e),
             )
             logger.error(f"[resume] candidate={candidate_id} failed: {e}")
             return {"candidate_id": candidate_id, "status": "failed", "error": str(e)}
@@ -128,22 +137,15 @@ class ResumeProcessingService:
             existing.processed_at = now
         else:
             self.db.add(ResumeProcessed(
-                candidate_id=candidate_id,
-                resume_text=resume_text,
-                cleaned_text=cleaned_text,
-                structured_json=structured_json,
-                embedding=embedding,
-                resume_hash=resume_hash,
-                parse_status=parse_status,
-                parse_error=parse_error,
-                processed_at=now,
+                candidate_id=candidate_id, resume_text=resume_text, cleaned_text=cleaned_text,
+                structured_json=structured_json, embedding=embedding, resume_hash=resume_hash,
+                parse_status=parse_status, parse_error=parse_error, processed_at=now,
             ))
         await self.db.commit()
 
     async def _mark_candidate_processed(self, candidate_id: int, value: bool):
         await self.db.execute(
-            update(CandidateRaw)
-            .where(CandidateRaw.candidate_id == candidate_id)
+            update(CandidateRaw).where(CandidateRaw.candidate_id == candidate_id)
             .values(resume_processed=value)
         )
         await self.db.commit()

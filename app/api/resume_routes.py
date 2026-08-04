@@ -16,6 +16,14 @@ async def process_resume_batch(
     return await service.process_all_resumes()
 
 
+@router.post("/batch-parallel")
+async def process_resume_batch_parallel(
+    db: AsyncSession = Depends(get_postgres_session),
+):
+    service = BatchProcessingService(db)
+    return await service.process_all_resumes_parallel_fetch()
+
+
 @router.post("/{candidate_id}")
 async def process_resume(
     candidate_id: int,

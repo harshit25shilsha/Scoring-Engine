@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -12,7 +12,7 @@ from app.database.models import (
 from app.scoring.rule_engine import (
     score_skills, score_experience, score_education, score_location,
 )
-from app.scoring.similarity import cosine_similarity, similarity_to_percentage
+from app.scoring.similarity import similarity_to_percentage
 
 
 class RuleScoringService:
@@ -33,12 +33,15 @@ class RuleScoringService:
         )
         resumes = result.scalars().all()
 
-        # Bulk-fetch every candidate in ONE query instead of one query per candidate (N+1 fix)
         candidate_ids = [r.candidate_id for r in resumes]
         candidates_result = await self.db.execute(
             select(CandidateRaw).where(CandidateRaw.candidate_id.in_(candidate_ids))
         )
         candidates_by_id = {c.candidate_id: c for c in candidates_result.scalars().all()}
+
+        # Bulk, Postgres-native similarity for ALL candidates in one query,
+        # instead of one Python cosine_similarity() call per candidate.
+        similarities_by_candidate = await self._fetch_bulk_similarities(job_processed.embedding)
 
         scored, skipped = 0, 0
 
@@ -51,7 +54,14 @@ class RuleScoringService:
                 continue
 
             try:
-                await self._score_pair(candidate_raw, resume, job_raw, job_processed, job_structured)
+                raw_similarity = similarities_by_candidate.get(resume.candidate_id)
+                embedding_sim_pct = (
+                    similarity_to_percentage(raw_similarity) if raw_similarity is not None else None
+                )
+
+                await self._score_pair(
+                    candidate_raw, resume, job_raw, job_structured, embedding_sim_pct
+                )
                 scored += 1
             except Exception as e:
                 await self.db.rollback()
@@ -63,7 +73,27 @@ class RuleScoringService:
         logger.info(f"[rule-score] job={job_id} scored={scored} skipped={skipped}")
         return {"job_id": job_id, "status": "completed", "scored": scored, "skipped": skipped}
 
-    async def _score_pair(self, candidate_raw, resume, job_raw, job_processed, job_structured):
+    async def _fetch_bulk_similarities(self, job_embedding) -> dict[int, float]:
+        """
+        Single Postgres-native query computing cosine similarity between the job's
+        embedding and EVERY candidate's embedding at once, using pgvector's <=> operator.
+        Returns {candidate_id: similarity} for all structured, embedded candidates.
+        """
+        if job_embedding is None:
+            return {}
+
+        # pgvector over asyncpg expects the vector as a literal string like '[0.1,0.2,...]'
+        job_embedding_str = "[" + ",".join(str(float(x)) for x in job_embedding) + "]"
+
+        query = text("""
+            SELECT candidate_id, 1 - (embedding <=> CAST(:job_embedding AS vector)) AS similarity
+            FROM resume_processed
+            WHERE structured_json IS NOT NULL AND embedding IS NOT NULL
+        """)
+        result = await self.db.execute(query, {"job_embedding": job_embedding_str})
+        return {row[0]: row[1] for row in result.all()}
+
+    async def _score_pair(self, candidate_raw, resume, job_raw, job_structured, embedding_sim_pct):
         candidate_structured = json.loads(resume.structured_json)
 
         skills_result = score_skills(
@@ -99,11 +129,6 @@ class RuleScoringService:
             + edu_score * settings.EDUCATION_WEIGHT
             + loc_score * settings.LOCATION_WEIGHT
         )
-
-        embedding_sim_pct = None
-        if resume.embedding is not None and job_processed.embedding is not None:
-            raw_similarity = cosine_similarity(resume.embedding, job_processed.embedding)
-            embedding_sim_pct = similarity_to_percentage(raw_similarity)
 
         await self._upsert_score(
             candidate_id=candidate_raw.candidate_id,

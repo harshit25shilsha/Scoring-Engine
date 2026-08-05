@@ -35,8 +35,6 @@ class SemanticScoringService:
         if not pending_scores:
             return {"job_id": job_id, "status": "completed", "llm_reviewed": 0, "fallback_scored": 0}
 
-        # Rank by combined signal: rule_score + embedding_similarity (equal weight)
-        # so strong candidates the rule engine underrates can still surface via embeddings.
         def ranking_key(score_row):
             rule = score_row.rule_score or 0
             sim = score_row.embedding_similarity or 0
@@ -75,16 +73,19 @@ class SemanticScoringService:
                 score_row.recommendation = semantic_result.get("recommendation")
                 score_row.llm_reviewed = True
 
+                # missing_skills stays exactly as computed by the rule engine —
+                # no longer requested from Groq (redundant, saves tokens).
+                # Dedupe case-insensitively as a safety net against any legacy
+                # duplicate entries from before this change.
                 existing_missing = json.loads(score_row.missing_skills or "[]")
-                llm_missing = semantic_result.get("missing_skills", [])
                 seen_lower = set()
-                merged_missing = []
-                for skill in existing_missing + llm_missing:
+                deduped_missing = []
+                for skill in existing_missing:
                     key = skill.strip().lower()
                     if key not in seen_lower:
                         seen_lower.add(key)
-                        merged_missing.append(skill)
-                score_row.missing_skills = json.dumps(merged_missing)
+                        deduped_missing.append(skill)
+                score_row.missing_skills = json.dumps(deduped_missing)
 
                 score_row.generated_at = datetime.now(timezone.utc)
                 await self.db.commit()
@@ -104,8 +105,6 @@ class SemanticScoringService:
 
             await asyncio.sleep(settings.GROQ_BATCH_DELAY_SECONDS)
 
-        # Fallback: honest, embedding-derived score for candidates outside the review shortlist —
-        # not a fake number, and clearly labeled as not LLM-reviewed.
         fallback_scored = 0
         for score_row in fallback_candidates:
             score_row.semantic_score = score_row.embedding_similarity or 0.0

@@ -1,11 +1,17 @@
 import re
+from typing import Any
 
 
-def _normalize(text: str) -> str:
-    return text.lower().strip()
+def _normalize(text: Any) -> str:
+    if text is None:
+        return ""
+    return str(text).lower().strip()
 
 
 def _extract_alternatives(skill_phrase: str) -> list[str]:
+    skill_phrase = _normalize(skill_phrase)
+    if not skill_phrase:
+        return []
     
     base = re.sub(r"\(.*?\)", "", skill_phrase).strip()
     tokens = [base] if base else []
@@ -21,7 +27,7 @@ def _extract_alternatives(skill_phrase: str) -> list[str]:
 
 
 def _skill_matches(candidate_skills: list[str], required_skill: str) -> bool:
-    candidate_norm = [_normalize(s) for s in candidate_skills]
+    candidate_norm = [_normalize(s) for s in candidate_skills if _normalize(s)]
     alternatives = _extract_alternatives(required_skill)
 
     for alt in alternatives:
@@ -32,6 +38,7 @@ def _skill_matches(candidate_skills: list[str], required_skill: str) -> bool:
 
 
 def score_skills(candidate_skills: list[str], required_skills: list[str]) -> dict:
+    required_skills = [skill for skill in required_skills if _normalize(skill)]
     if not required_skills:
         return {"score": 100.0, "matched": [], "missing": []}
 
@@ -69,12 +76,17 @@ def score_experience(
 
 
 def score_education(candidate_education: list[dict], required_education: list[str]) -> float:
+    required_education = [requirement for requirement in required_education if _normalize(requirement)]
     if not required_education:
         return 100.0
     if not candidate_education:
         return 40.0  # can't verify, partial credit rather than zero
 
-    candidate_degrees = [_normalize(e.get("degree", "")) for e in candidate_education]
+    candidate_degrees = [
+        _normalize(e.get("degree", "") if isinstance(e, dict) else e)
+        for e in candidate_education
+    ]
+    candidate_degrees = [degree for degree in candidate_degrees if degree]
 
     for requirement in required_education:
         req_norm = _normalize(requirement)

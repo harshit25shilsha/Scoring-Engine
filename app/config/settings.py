@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     
     SEMANTIC_REVIEW_TOP_N_PER_JOB: int
     SEMANTIC_REVIEW_MIN_RULE_SCORE: float
+    GROQ_MODEL: str
+
 
     @property
     def postgres_url(self) -> str:

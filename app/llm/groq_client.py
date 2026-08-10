@@ -5,7 +5,7 @@ from groq import Groq, RateLimitError
 from app.config import settings
 from app.config.logging import logger
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = settings.GROQ_MODEL
 
 
 class GroqClient:

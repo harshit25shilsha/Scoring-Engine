@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,9 +13,19 @@ from app.llm.semantic_matcher import SemanticMatcher
 
 
 class SemanticScoringService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, matcher: Optional[SemanticMatcher] = None):
+        """Create service.
+
+        Args:
+            db: async SQLAlchemy session
+            matcher: optional injectable `SemanticMatcher` for easier testing
+        """
         self.db = db
-        self.matcher = SemanticMatcher()
+        self.matcher = matcher or SemanticMatcher()
+
+    async def _compare(self, candidate_structured: Dict[str, Any], job_structured: Dict[str, Any]) -> Dict[str, Any]:
+        """Run matcher.compare in a thread to avoid blocking the event loop."""
+        return await asyncio.to_thread(self.matcher.compare, candidate_structured, job_structured) or {}
 
     async def generate_semantic_scores_for_job(self, job_id: int) -> dict:
         job_processed = await self.db.get(JobProcessed, job_id)
@@ -57,67 +68,114 @@ class SemanticScoringService:
 
         llm_reviewed, llm_failed = 0, 0
 
+        candidate_ids = [s.candidate_id for s in eligible_for_llm]
+        resumes_map = {}
+        if candidate_ids:
+            res_result = await self.db.execute(
+                select(ResumeProcessed).where(ResumeProcessed.candidate_id.in_(candidate_ids))
+            )
+            fetched_resumes = res_result.scalars().all()
+            resumes_map = {r.candidate_id: r for r in fetched_resumes}
+
+        # Claim and process each eligible candidate one-at-a-time using FOR UPDATE SKIP LOCKED
+        # This prevents duplicate work across concurrent workers by letting the DB lock the row.
+        fallback_scored = 0
         for score_row in eligible_for_llm:
-            resume = await self.db.get(ResumeProcessed, score_row.candidate_id)
-            if resume is None or not resume.structured_json:
-                llm_failed += 1
-                continue
-
             try:
-                candidate_structured = json.loads(resume.structured_json)
-                semantic_result = self.matcher.compare(candidate_structured, job_structured)
-
-                score_row.semantic_score = float(semantic_result.get("semantic_score", 0))
-                score_row.strengths = json.dumps(semantic_result.get("strengths", []))
-                score_row.weaknesses = json.dumps(semantic_result.get("weaknesses", []))
-                score_row.recommendation = semantic_result.get("recommendation")
-                score_row.llm_reviewed = True
-
-                # missing_skills stays exactly as computed by the rule engine —
-                # no longer requested from Groq (redundant, saves tokens).
-                # Dedupe case-insensitively as a safety net against any legacy
-                # duplicate entries from before this change.
-                existing_missing = json.loads(score_row.missing_skills or "[]")
-                seen_lower = set()
-                deduped_missing = []
-                for skill in existing_missing:
-                    key = skill.strip().lower()
-                    if key not in seen_lower:
-                        seen_lower.add(key)
-                        deduped_missing.append(skill)
-                score_row.missing_skills = json.dumps(deduped_missing)
-
-                score_row.generated_at = datetime.now(timezone.utc)
-                await self.db.commit()
-
-                llm_reviewed += 1
-                logger.info(
-                    f"[semantic-score] candidate={score_row.candidate_id} job={job_id} "
-                    f"LLM-reviewed semantic_score={score_row.semantic_score}"
+                # Try to atomically claim this candidate row. If another worker has locked it,
+                # skip it (SKIP LOCKED). Use existing transaction if present to avoid nested begins.
+                claim_q = (
+                    select(CandidateJobScore)
+                    .where(
+                        CandidateJobScore.id == score_row.id,
+                        CandidateJobScore.semantic_score.is_(None),
+                    )
+                    .with_for_update(skip_locked=True)
                 )
 
-            except Exception as e:
-                await self.db.rollback()
-                llm_failed += 1
-                logger.error(
-                    f"[semantic-score] candidate={score_row.candidate_id} job={job_id} failed: {e}"
+                claim_res = await self.db.execute(claim_q)
+                claimed = claim_res.scalar_one_or_none()
+                if claimed is None:
+                    continue
+
+                resume = resumes_map.get(claimed.candidate_id)
+                if resume is None or not resume.structured_json:
+                    llm_failed += 1
+                    logger.warning(
+                        f"[semantic-score] missing or empty resume for candidate={claimed.candidate_id} job={job_id}"
+                    )
+                    await self.db.rollback()
+                    continue
+
+                try:
+                    candidate_structured = json.loads(resume.structured_json)
+                except json.JSONDecodeError:
+                    llm_failed += 1
+                    logger.exception(
+                        f"[semantic-score] invalid resume JSON for candidate={claimed.candidate_id} job={job_id}"
+                    )
+                    await self.db.rollback()
+                    continue
+
+                try:
+                    semantic_result = await self._compare(candidate_structured, job_structured)
+
+                    claimed.semantic_score = float(semantic_result.get("semantic_score", 0))
+                    claimed.strengths = json.dumps(semantic_result.get("strengths", []))
+                    claimed.weaknesses = json.dumps(semantic_result.get("weaknesses", []))
+                    claimed.recommendation = semantic_result.get("recommendation")
+                    claimed.llm_reviewed = True
+
+                    existing_missing = json.loads(claimed.missing_skills or "[]")
+                    seen_lower = set()
+                    deduped_missing = []
+                    for skill in existing_missing:
+                        key = skill.strip().lower()
+                        if key not in seen_lower:
+                            seen_lower.add(key)
+                            deduped_missing.append(skill)
+                    claimed.missing_skills = json.dumps(deduped_missing)
+
+                    claimed.generated_at = datetime.now(timezone.utc)
+
+                    await self.db.commit()
+                    llm_reviewed += 1
+                    logger.info(
+                        f"[semantic-score] candidate={claimed.candidate_id} job={job_id} "
+                        f"LLM-reviewed semantic_score={claimed.semantic_score}"
+                    )
+                except Exception as e:
+                    llm_failed += 1
+                    await self.db.rollback()
+                    logger.exception(
+                        f"[semantic-score] candidate={claimed.candidate_id} job={job_id} failed: {e}"
+                    )
+
+            except Exception:
+                logger.exception(
+                    f"[semantic-score] unexpected error claiming/processing candidate={score_row.candidate_id} job={job_id}"
                 )
 
             await asyncio.sleep(settings.GROQ_BATCH_DELAY_SECONDS)
 
-        fallback_scored = 0
+        # Apply fallback scores for remaining candidates (no LLM review).
         for score_row in fallback_candidates:
-            score_row.semantic_score = score_row.embedding_similarity or 0.0
-            score_row.recommendation = (
-                "Not selected for detailed AI review this cycle (outside top-ranked "
-                "candidates by rule + embedding similarity). Score reflects resume-to-job "
-                "semantic similarity only, not a full LLM assessment."
-            )
-            score_row.llm_reviewed = False
-            score_row.generated_at = datetime.now(timezone.utc)
-            fallback_scored += 1
-
-        await self.db.commit()
+            try:
+                score_row.semantic_score = score_row.embedding_similarity or 0.0
+                score_row.recommendation = (
+                    "Not selected for detailed AI review this cycle (outside top-ranked "
+                    "candidates by rule + embedding similarity). Score reflects resume-to-job "
+                    "semantic similarity only, not a full LLM assessment."
+                )
+                score_row.llm_reviewed = False
+                score_row.generated_at = datetime.now(timezone.utc)
+                await self.db.commit()
+                fallback_scored += 1
+            except Exception:
+                await self.db.rollback()
+                logger.exception(
+                    f"[semantic-score] fallback scoring failed for candidate={score_row.candidate_id} job={job_id}"
+                )
 
         summary = {
             "job_id": job_id,

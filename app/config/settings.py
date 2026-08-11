@@ -67,7 +67,16 @@ class Settings(BaseSettings):
     SEMANTIC_REVIEW_TOP_N_PER_JOB: int
     SEMANTIC_REVIEW_MIN_RULE_SCORE: float
     GROQ_MODEL: str
-
+    
+    # API AUTH
+    SECRET_KEY: str
+    
+    # Redis
+    REDIS_URL: str
+    RESCORE_LOCK_TTL_SECONDS: int
+    DAILY_TOKEN_LIMIT: int
+    
+    CACHE_TTL_SECONDS:int
 
     @property
     def postgres_url(self) -> str:

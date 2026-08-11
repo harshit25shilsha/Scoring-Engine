@@ -8,6 +8,7 @@ from app.database.models import JobRaw, ResumeProcessed, CandidateJobScore
 from app.services.rule_scoring_service import RuleScoringService
 from app.services.semantic_scoring_service import SemanticScoringService
 from app.services.final_scoring_service import FinalScoringService
+from app.core.token_budget import has_sufficient_budget, get_remaining_budget
 
 
 class AutoScoringService:
@@ -46,6 +47,19 @@ class AutoScoringService:
         """)
         result = await self.db.execute(query, {"limit": limit})
         return [row[0] for row in result.all()]
+    
+    
+    async def run_scoring_cycle(self) -> dict:
+        if not has_sufficient_budget():
+            remaining = get_remaining_budget()
+            logger.warning(
+                f"[auto-score] skipping cycle — insufficient Groq token budget "
+                f"remaining today ({remaining} tokens)"
+            )
+            return {"jobs_processed": 0, "details": [], "status": "skipped_budget_exhausted"}
+
+        job_ids = await self.find_jobs_needing_scoring(settings.MAX_JOBS_PER_SCORING_CYCLE)
+        
 
 
     async def run_scoring_cycle(self) -> dict:

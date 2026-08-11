@@ -7,14 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.config.logging import logger
 from app.database.models import CandidateJobScore
+from app.core.cache import get_cached_ranked_candidates, set_cached_ranked_candidates
 
+from app.core.cache import invalidate_ranked_candidates_cache
 
 class FinalScoringService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
     async def finalize_scores_for_job(self, job_id: int) -> dict:
-        
         result = await self.db.execute(
             select(CandidateJobScore).where(
                 CandidateJobScore.job_id == job_id,
@@ -36,6 +37,8 @@ class FinalScoringService:
 
         await self.db.commit()
         logger.info(f"[final-score] job={job_id} finalized={updated}")
+        await invalidate_ranked_candidates_cache(job_id)
+        
         return {"job_id": job_id, "status": "completed", "finalized": updated}
 
     async def get_ranked_candidates(
@@ -47,6 +50,11 @@ class FinalScoringService:
         sort_by: str = "overall_score",
         sort_order: str = "desc",
     ) -> dict:
+        cached = await get_cached_ranked_candidates(job_id, page, page_size, min_score, sort_by, sort_order)
+        if cached is not None:
+            logger.info(f"[cache] hit for job={job_id} page={page}")
+            return cached
+
         query = select(CandidateJobScore).where(
             CandidateJobScore.job_id == job_id,
             CandidateJobScore.overall_score.is_not(None),
@@ -92,7 +100,7 @@ class FinalScoringService:
             for s in paginated
         ]
 
-        return {
+        response = {
             "job_id": job_id,
             "total_candidates": total,
             "page": page,
@@ -100,3 +108,6 @@ class FinalScoringService:
             "total_pages": (total + page_size - 1) // page_size,
             "results": results,
         }
+
+        await set_cached_ranked_candidates(job_id, page, page_size, min_score, sort_by, sort_order, response)
+        return response

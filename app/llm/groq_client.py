@@ -1,9 +1,11 @@
 import json
 import time
+
 from groq import Groq, RateLimitError
 
 from app.config import settings
 from app.config.logging import logger
+from app.core.token_budget import track_token_usage
 
 GROQ_MODEL = settings.GROQ_MODEL
 
@@ -14,10 +16,9 @@ class GroqClient:
 
     def extract_json(self, system_prompt: str, user_content: str, max_retries: int = 3) -> dict:
         last_error = None
-        
-        for attempt in range(1, max_retries+1):
+
+        for attempt in range(1, max_retries + 1):
             try:
-                
                 response = self.client.chat.completions.create(
                     model=GROQ_MODEL,
                     messages=[
@@ -28,6 +29,11 @@ class GroqClient:
                     response_format={"type": "json_object"},
                 )
 
+                # Capture real token usage from Groq's response for budget tracking
+                if hasattr(response, "usage") and response.usage:
+                    total_tokens = response.usage.total_tokens
+                    track_token_usage(total_tokens)
+
                 raw = response.choices[0].message.content
 
                 try:
@@ -35,18 +41,15 @@ class GroqClient:
                 except json.JSONDecodeError as e:
                     logger.error(f"[groq] invalid JSON returned: {e} | raw={raw[:300]}")
                     raise ValueError("Groq did not return valid JSON") from e
-            
+
             except RateLimitError as e:
                 last_error = e
-                wait_seconds = attempt * 15 
+                wait_seconds = attempt * 15
                 logger.warning(
-                    f"[groq] rate limit hit (attempt{attempt}/{max_retries}),"
+                    f"[groq] rate limit hit (attempt {attempt}/{max_retries}), "
                     f"waiting {wait_seconds}s before retry"
                 )
-                
                 time.sleep(wait_seconds)
-        
+
         logger.error(f"[groq] exhausted {max_retries} retries due to rate limiting")
         raise last_error
-
-                

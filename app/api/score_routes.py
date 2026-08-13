@@ -12,6 +12,7 @@ from app.core.token_budget import get_remaining_budget,get_used_today,DAILY_TOKE
 router = APIRouter(tags=["scoring"])
 
 
+
 @router.post("/generate-score/{job_id}")
 async def generate_score(
     job_id: int,
@@ -19,6 +20,8 @@ async def generate_score(
 ):
     service = RuleScoringService(db)
     return await service.score_job_against_all_candidates(job_id)
+
+
 
 @router.post("/generate-semantic-score/{job_id}")
 async def generate_semantic_score(
@@ -38,6 +41,7 @@ async def finalize_score(
     return await service.finalize_scores_for_job(job_id)
 
 
+
 @router.get("/jobs/{job_id}/candidates")
 async def get_ranked_candidates(
     job_id: int,
@@ -53,38 +57,7 @@ async def get_ranked_candidates(
         job_id, page, page_size, min_score, sort_by, sort_order
     )
     
-@router.post("/jobs/{job_id}/rescore")
-async def rescore_job_now(
-    job_id: int,
-    db: AsyncSession = Depends(get_postgres_session),
-):
-    acquired = await try_acquire_rescore_lock(job_id)
-    if not acquired:
-        raise HTTPException(
-            status_code= status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Job {job_id} was rescored recently. Please wait before retrying,",
-        )
-        
-    try:
-        rule_service = RuleScoringService(db)
-        semantic_service = SemanticScoringService(db)
-        final_service = FinalScoringService(db)
-        
-        rule_result = await rule_service.score_job_against_all_candidates(job_id)
-        semantic_result = await semantic_service.generate_semantic_scores_for_job(job_id)
-        final_result = await final_service.finalize_scores_for_job(job_id)
 
-        return {
-            "job_id": job_id,
-            "status": "completed",
-            "rule": rule_result,
-            "semantic": semantic_result,
-            "final": final_result,
-        }
-        
-    finally:
-        await release_rescore_lock(job_id)
-        
 
 @router.get("/groq-budget")
 async def get_groq_budget_status():

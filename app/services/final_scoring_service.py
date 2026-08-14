@@ -7,9 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.config.logging import logger
 from app.database.models import CandidateJobScore
-from app.core.cache import get_cached_ranked_candidates, set_cached_ranked_candidates
+from app.core.cache import get_cached_ranked_candidates, set_cached_ranked_candidates, invalidate_ranked_candidates_cache
 
-from app.core.cache import invalidate_ranked_candidates_cache
 
 class FinalScoringService:
     def __init__(self, db: AsyncSession):
@@ -38,8 +37,44 @@ class FinalScoringService:
         await self.db.commit()
         logger.info(f"[final-score] job={job_id} finalized={updated}")
         await invalidate_ranked_candidates_cache(job_id)
-        
+
         return {"job_id": job_id, "status": "completed", "finalized": updated}
+
+    async def override_candidate_score(
+        self, candidate_id: int, job_id: int, override_score: float, note: str, overridden_by: str
+    ) -> dict:
+        result = await self.db.execute(
+            select(CandidateJobScore).where(
+                CandidateJobScore.candidate_id == candidate_id,
+                CandidateJobScore.job_id == job_id,
+            )
+        )
+        score_row = result.scalar_one_or_none()
+
+        if score_row is None:
+            return {"status": "not_found", "candidate_id": candidate_id, "job_id": job_id}
+
+        score_row.override_score = override_score
+        score_row.override_note = note
+        score_row.overridden_by = overridden_by
+        score_row.overridden_at = datetime.now(timezone.utc)
+        await self.db.commit()
+
+        logger.info(
+            f"[override] candidate={candidate_id} job={job_id} "
+            f"override_score={override_score} by={overridden_by}"
+        )
+
+        await invalidate_ranked_candidates_cache(job_id)
+
+        return {
+            "status": "completed",
+            "candidate_id": candidate_id,
+            "job_id": job_id,
+            "override_score": override_score,
+            "override_note": note,
+            "overridden_by": overridden_by,
+        }
 
     async def get_ranked_candidates(
         self,
@@ -91,6 +126,9 @@ class FinalScoringService:
                 "experience_score": s.experience_score,
                 "education_score": s.education_score,
                 "location_score": s.location_score,
+                "override_score": s.override_score,
+                "override_note": s.override_note,
+                "overridden_by": s.overridden_by,
                 "matched_skills": json.loads(s.matched_skills or "[]"),
                 "missing_skills": json.loads(s.missing_skills or "[]"),
                 "strengths": json.loads(s.strengths or "[]"),

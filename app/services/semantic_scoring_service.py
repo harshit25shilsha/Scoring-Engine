@@ -125,6 +125,7 @@ class SemanticScoringService:
                     claimed.weaknesses = json.dumps(semantic_result.get("weaknesses", []))
                     claimed.recommendation = semantic_result.get("recommendation")
                     claimed.llm_reviewed = True
+                    claimed.score_source = "llm_reviewed"
 
                     existing_missing = json.loads(claimed.missing_skills or "[]")
                     seen_lower = set()
@@ -169,6 +170,7 @@ class SemanticScoringService:
                 )
                 score_row.llm_reviewed = False
                 score_row.generated_at = datetime.now(timezone.utc)
+                score_row.score_source = "embedding_fallback"
                 await self.db.commit()
                 fallback_scored += 1
             except Exception:

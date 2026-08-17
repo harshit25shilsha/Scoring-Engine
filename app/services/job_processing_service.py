@@ -11,6 +11,7 @@ from app.llm.jd_extractor import JDExtractor
 from app.parsers.text_cleaner import clean_text
 from app.utils.hashing import hash_text
 
+MIN_JD_LENGTH_FOR_SKILLS_CHECK = 150  # chars — below this, a JD is genuinely too short to expect skills
 
 class JobProcessingService:
     def __init__(self, db: AsyncSession):
@@ -45,6 +46,12 @@ class JobProcessingService:
             structured_error = str(e)
             logger.error(f"[groq] JD structuring failed for job={job_id}: {e}")
 
+        skills_extraction_uncertain = (
+            bool(cleaned) and len(cleaned) >= MIN_JD_LENGTH_FOR_SKILLS_CHECK
+            and structured is not None
+            and not structured.get("required_skills")
+        )
+
         embedding_vector = None
         if structured:
             try:
@@ -60,6 +67,7 @@ class JobProcessingService:
             jd_hash=content_hash,
             parse_status="STRUCTURED" if structured else "PARSED_ONLY",
             parse_error=structured_error,
+            skills_extraction_uncertain=skills_extraction_uncertain,
         )
 
         if structured:
@@ -78,7 +86,7 @@ class JobProcessingService:
 
     async def _store_result(
         self, job_id, cleaned_jd, structured_json, embedding,
-        jd_hash, parse_status, parse_error
+        jd_hash, parse_status, parse_error, skills_extraction_uncertain
     ):
         existing = await self.db.get(JobProcessed, job_id)
         now = datetime.now(timezone.utc)
@@ -90,6 +98,7 @@ class JobProcessingService:
             existing.jd_hash = jd_hash
             existing.parse_status = parse_status
             existing.parse_error = parse_error
+            existing.skills_extraction_uncertain = skills_extraction_uncertain
             existing.processed_at = now
         else:
             self.db.add(JobProcessed(
@@ -100,6 +109,7 @@ class JobProcessingService:
                 jd_hash=jd_hash,
                 parse_status=parse_status,
                 parse_error=parse_error,
+                skills_extraction_uncertain=skills_extraction_uncertain,
                 processed_at=now,
             ))
         await self.db.commit()

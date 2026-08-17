@@ -60,7 +60,7 @@ class RuleScoringService:
                 )
 
                 await self._score_pair(
-                    candidate_raw, resume, job_raw, job_structured, embedding_sim_pct
+                    candidate_raw, resume, job_raw, job_processed, job_structured, embedding_sim_pct
                 )
                 scored += 1
             except Exception as e:
@@ -93,12 +93,15 @@ class RuleScoringService:
         result = await self.db.execute(query, {"job_embedding": job_embedding_str})
         return {row[0]: row[1] for row in result.all()}
 
-    async def _score_pair(self, candidate_raw, resume, job_raw, job_structured, embedding_sim_pct):
+    async def _score_pair(
+        self, candidate_raw, resume, job_raw, job_processed, job_structured, embedding_sim_pct
+    ):
         candidate_structured = json.loads(resume.structured_json)
 
         skills_result = score_skills(
             candidate_skills=candidate_structured.get("skills", []),
             required_skills=job_structured.get("required_skills", []),
+            extraction_uncertain=job_processed.skills_extraction_uncertain,
         )
 
         exp_score = score_experience(
@@ -123,6 +126,48 @@ class RuleScoringService:
             work_type=job_raw.work_type,
         )
 
+        evidence = {
+            "skills": {
+                "matched": skills_result["matched"],
+                "missing": skills_result["missing"],
+                "candidate_skills_considered": candidate_structured.get("skills", []),
+            },
+            "experience": {
+                "candidate_years": candidate_structured.get("total_experience_years"),
+                "required_min": job_structured.get("minimum_experience_years"),
+                "required_max": job_structured.get("maximum_experience_years"),
+                "result": (
+                    "within_range" if exp_score == 100.0
+                    else "underqualified" if candidate_structured.get("total_experience_years") is not None
+                    and job_structured.get("minimum_experience_years") is not None
+                    and candidate_structured.get("total_experience_years") < job_structured.get("minimum_experience_years")
+                    else "overqualified" if exp_score < 100.0
+                    else "unverifiable"
+                ),
+            },
+            "education": {
+                "candidate_degrees": [
+                    e.get("degree") if isinstance(e, dict) else e
+                    for e in candidate_structured.get("education", [])
+                ],
+                "required": job_structured.get("education_requirements", []),
+                "matched": edu_score == 100.0,
+            },
+            "location": {
+                "candidate_location": f"{candidate_raw.city}, {candidate_raw.state}, {candidate_raw.country}",
+                "job_location": job_raw.job_location or f"{job_raw.city}, {job_raw.state}, {job_raw.country}",
+                "work_type": job_raw.work_type,
+                "match_tier": (
+                    "exact_city" if loc_score == 100.0 and "remote" not in (job_raw.job_location or "").lower()
+                    else "remote" if loc_score == 100.0
+                    else "state_match" if loc_score == 70.0
+                    else "country_match" if loc_score == 50.0
+                    else "no_data" if loc_score == 50.0
+                    else "mismatch"
+                ),
+            },
+        }
+
         rule_score = (
             skills_result["score"] * settings.SKILLS_WEIGHT
             + exp_score * settings.EXPERIENCE_WEIGHT
@@ -141,12 +186,13 @@ class RuleScoringService:
             embedding_similarity=embedding_sim_pct,
             matched_skills=skills_result["matched"],
             missing_skills=skills_result["missing"],
+            evidence=json.dumps(evidence),
         )
 
     async def _upsert_score(
         self, candidate_id, job_id, rule_score, skills_score,
         experience_score, education_score, location_score,
-        embedding_similarity, matched_skills, missing_skills,
+        embedding_similarity, matched_skills, missing_skills, evidence,
     ):
         result = await self.db.execute(
             select(CandidateJobScore).where(
@@ -166,6 +212,7 @@ class RuleScoringService:
             existing.embedding_similarity = embedding_similarity
             existing.matched_skills = json.dumps(matched_skills)
             existing.missing_skills = json.dumps(missing_skills)
+            existing.evidence = evidence
             existing.generated_at = now
         else:
             self.db.add(CandidateJobScore(
@@ -179,6 +226,7 @@ class RuleScoringService:
                 embedding_similarity=embedding_similarity,
                 matched_skills=json.dumps(matched_skills),
                 missing_skills=json.dumps(missing_skills),
+                evidence=evidence,
                 generated_at=now,
             ))
         await self.db.commit()

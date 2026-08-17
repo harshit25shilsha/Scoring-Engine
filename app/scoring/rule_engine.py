@@ -32,15 +32,52 @@ def _skill_matches(candidate_skills: list[str], required_skill: str) -> bool:
 
     for alt in alternatives:
         for cand in candidate_norm:
-            if alt in cand or cand in alt:
+            if _tokens_match(alt, cand):
                 return True
     return False
 
 
-def score_skills(candidate_skills: list[str], required_skills: list[str]) -> dict:
+def _tokens_match(alt: str, cand: str) -> bool:
+    """
+    Exact match, or one is a whole-word-bounded substring of the other —
+    e.g. 'react' matches inside 'react native' (word boundary respected),
+    but 'java' does NOT match inside 'javascript' (no word boundary there).
+    """
+    if alt == cand:
+        return True
+
+    # word-boundary-aware substring check using regex, not raw `in`
+    pattern = r'\b' + re.escape(alt) + r'\b'
+    if re.search(pattern, cand):
+        return True
+
+    pattern = r'\b' + re.escape(cand) + r'\b'
+    if re.search(pattern, alt):
+        return True
+
+    return False
+
+
+def score_skills(
+    candidate_skills: list[str],
+    required_skills: list[str],
+    extraction_uncertain: bool = False,
+) -> dict:
     required_skills = [skill for skill in required_skills if _normalize(skill)]
     if not required_skills:
-        return {"score": 100.0, "matched": [], "missing": []}
+        if extraction_uncertain:
+            return {
+                "score": 50.0,
+                "matched": [],
+                "missing": [],
+                "confidence": "low_extraction",
+            }
+        return {
+            "score": 100.0,
+            "matched": [],
+            "missing": [],
+            "confidence": "no_requirement_stated",
+        }
 
     matched, missing = [], []
     for skill in required_skills:
@@ -50,7 +87,7 @@ def score_skills(candidate_skills: list[str], required_skills: list[str]) -> dic
             missing.append(skill)
 
     score = (len(matched) / len(required_skills)) * 100
-    return {"score": round(score, 2), "matched": matched, "missing": missing}
+    return {"score": round(score, 2), "matched": matched, "missing": missing, "confidence": "matched"}
 
 
 def score_experience(

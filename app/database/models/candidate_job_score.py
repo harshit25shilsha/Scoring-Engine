@@ -26,10 +26,14 @@ class CandidateJobScore(Base):
     override_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     overridden_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     overridden_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-        
+    
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True) 
+    
     matched_skills: Mapped[str | None] = mapped_column(Text, nullable=True)
     missing_skills: Mapped[str | None] = mapped_column(Text, nullable=True)
-
+    score_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    
+    
     strengths: Mapped[str | None] = mapped_column(Text, nullable=True)
     weaknesses: Mapped[str | None] = mapped_column(Text, nullable=True)
     recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)

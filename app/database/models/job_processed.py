@@ -1,4 +1,4 @@
-from sqlalchemy import String, Text, DateTime
+from sqlalchemy import String, Text, DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -18,6 +18,7 @@ class JobProcessed(Base):
         Vector(settings.EMBEDDINGS_DIMENSIONS),nullable= True
     )
     
+    skills_extraction_uncertain: Mapped[bool] = mapped_column(Boolean, default=False)
     
     jd_hash: Mapped[str | None] = mapped_column(String(64))
 

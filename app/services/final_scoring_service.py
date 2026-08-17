@@ -57,6 +57,7 @@ class FinalScoringService:
         score_row.override_score = override_score
         score_row.override_note = note
         score_row.overridden_by = overridden_by
+        score_row.score_source = "manual_override"
         score_row.overridden_at = datetime.now(timezone.utc)
         await self.db.commit()
 
@@ -74,6 +75,7 @@ class FinalScoringService:
             "override_score": override_score,
             "override_note": note,
             "overridden_by": overridden_by,
+            "score_source":"manual_override",
         }
 
     async def get_ranked_candidates(
@@ -129,8 +131,10 @@ class FinalScoringService:
                 "override_score": s.override_score,
                 "override_note": s.override_note,
                 "overridden_by": s.overridden_by,
+                "score_source": s.score_source,
                 "matched_skills": json.loads(s.matched_skills or "[]"),
                 "missing_skills": json.loads(s.missing_skills or "[]"),
+                "evidence": json.loads(s.evidence or "{}"),
                 "strengths": json.loads(s.strengths or "[]"),
                 "weaknesses": json.loads(s.weaknesses or "[]"),
                 "recommendation": s.recommendation,

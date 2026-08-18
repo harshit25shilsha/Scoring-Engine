@@ -160,13 +160,16 @@ class SemanticScoringService:
             await asyncio.sleep(settings.GROQ_BATCH_DELAY_SECONDS)
 
         # Apply fallback scores for remaining candidates (no LLM review).
+        
         for score_row in fallback_candidates:
             try:
-                score_row.semantic_score = score_row.embedding_similarity or 0.0
+                similarity = score_row.embedding_similarity or 0.0
+                rule = score_row.rule_score or 0.0
+                score_row.semantic_score = round((similarity * 0.5) + (rule * 0.5), 2)
                 score_row.recommendation = (
                     "Not selected for detailed AI review this cycle (outside top-ranked "
-                    "candidates by rule + embedding similarity). Score reflects resume-to-job "
-                    "semantic similarity only, not a full LLM assessment."
+                    "candidates by rule + embedding similarity). Score blends resume-to-job "
+                    "semantic similarity with rule-based match, not a full LLM assessment."
                 )
                 score_row.llm_reviewed = False
                 score_row.generated_at = datetime.now(timezone.utc)

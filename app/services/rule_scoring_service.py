@@ -168,11 +168,23 @@ class RuleScoringService:
             },
         }
 
+        active_dimensions = []
+
+        if job_structured.get("required_skills") and skills_result["confidence"] != "no_requirement_stated":
+            active_dimensions.append((skills_result["score"], settings.SKILLS_WEIGHT))
+
+        if job_structured.get("minimum_experience_years") is not None:
+            active_dimensions.append((exp_score, settings.EXPERIENCE_WEIGHT))
+
+        if job_structured.get("education_requirements"):
+            active_dimensions.append((edu_score, settings.EDUCATION_WEIGHT))
+
+        active_dimensions.append((loc_score, settings.LOCATION_WEIGHT))  # location stays active
+
+        total_weight = sum(w for _, w in active_dimensions)
         rule_score = (
-            skills_result["score"] * settings.SKILLS_WEIGHT
-            + exp_score * settings.EXPERIENCE_WEIGHT
-            + edu_score * settings.EDUCATION_WEIGHT
-            + loc_score * settings.LOCATION_WEIGHT
+            sum(score * w for score, w in active_dimensions) / total_weight
+            if total_weight > 0 else 50.0
         )
 
         await self._upsert_score(

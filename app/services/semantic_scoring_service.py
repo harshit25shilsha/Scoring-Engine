@@ -11,6 +11,7 @@ from app.config.logging import logger
 from app.database.models import CandidateJobScore, ResumeProcessed, JobProcessed
 from app.llm.semantic_matcher import SemanticMatcher
 
+from app.scoring.similarity import blend_fallback_score
 
 class SemanticScoringService:
     def __init__(self, db: AsyncSession, matcher: Optional[SemanticMatcher] = None):
@@ -165,7 +166,8 @@ class SemanticScoringService:
             try:
                 similarity = score_row.embedding_similarity or 0.0
                 rule = score_row.rule_score or 0.0
-                score_row.semantic_score = round((similarity * 0.5) + (rule * 0.5), 2)
+                score_row.semantic_score = blend_fallback_score(score_row.embedding_similarity, score_row.rule_score)
+                
                 score_row.recommendation = (
                     "Not selected for detailed AI review this cycle (outside top-ranked "
                     "candidates by rule + embedding similarity). Score blends resume-to-job "

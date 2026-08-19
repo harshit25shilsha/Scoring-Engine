@@ -131,23 +131,16 @@ def _tokens_match(alt: str, cand: str) -> bool:
 def score_skills(
     candidate_skills: list[str],
     required_skills: list[str],
+    preferred_skills: list[str] | None = None,
     extraction_uncertain: bool = False,
 ) -> dict:
     required_skills = [skill for skill in required_skills if _normalize(skill)]
+    preferred_skills = [skill for skill in (preferred_skills or []) if _normalize(skill)]
+
     if not required_skills:
         if extraction_uncertain:
-            return {
-                "score": 50.0,
-                "matched": [],
-                "missing": [],
-                "confidence": "low_extraction",
-            }
-        return {
-            "score": 100.0,
-            "matched": [],
-            "missing": [],
-            "confidence": "no_requirement_stated",
-        }
+            return {"score": 50.0, "matched": [], "missing": [], "confidence": "low_extraction"}
+        return {"score": 100.0, "matched": [], "missing": [], "confidence": "no_requirement_stated"}
 
     matched, missing = [], []
     for skill in required_skills:
@@ -156,9 +149,26 @@ def score_skills(
         else:
             missing.append(skill)
 
-    score = (len(matched) / len(required_skills)) * 100
-    return {"score": round(score, 2), "matched": matched, "missing": missing, "confidence": "matched"}
+    base_score = (len(matched) / len(required_skills)) * 100
 
+    # Preferred skills contribute a smaller bonus, rewarding candidates who
+    # exceed the stated requirements without letting bonus skills alone
+    # inflate a genuinely weak required-skill match.
+    preferred_bonus = 0.0
+    matched_preferred = []
+    if preferred_skills:
+        matched_preferred = [s for s in preferred_skills if _skill_matches(candidate_skills, s)]
+        preferred_bonus = (len(matched_preferred) / len(preferred_skills)) * 15  # up to 15 bonus points
+
+    score = min(100.0, base_score + preferred_bonus)
+
+    return {
+        "score": round(score, 2),
+        "matched": matched,
+        "missing": missing,
+        "matched_preferred": matched_preferred,
+        "confidence": "matched",
+    }
 
 def score_experience(
     candidate_years: float | None,

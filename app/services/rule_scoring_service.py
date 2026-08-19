@@ -101,6 +101,7 @@ class RuleScoringService:
         skills_result = score_skills(
             candidate_skills=candidate_structured.get("skills", []),
             required_skills=job_structured.get("required_skills", []),
+            preferred_skills=job_structured.get("preferred_skills", []),
             extraction_uncertain=job_processed.skills_extraction_uncertain,
         )
 

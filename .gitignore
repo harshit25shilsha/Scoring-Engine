@@ -12,3 +12,4 @@ document.md
 tests/
 DEPLOYMENT_SUMMARY.md
 SCORING_FIX_ANALYSIS.md
+.coverage

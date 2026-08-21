@@ -139,8 +139,8 @@ def score_skills(
 
     if not required_skills:
         if extraction_uncertain:
-            return {"score": 50.0, "matched": [], "missing": [], "confidence": "low_extraction"}
-        return {"score": 100.0, "matched": [], "missing": [], "confidence": "no_requirement_stated"}
+            return {"score": 50.0, "matched": [], "missing": [], "matched_preferred": [], "confidence": "low_extraction"}
+        return {"score": 100.0, "matched": [], "missing": [], "matched_preferred": [], "confidence": "no_requirement_stated"}
 
     matched, missing = [], []
     for skill in required_skills:

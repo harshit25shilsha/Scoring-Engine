@@ -97,6 +97,7 @@ class RuleScoringService:
         self, candidate_raw, resume, job_raw, job_processed, job_structured, embedding_sim_pct
     ):
         candidate_structured = json.loads(resume.structured_json)
+        
 
         skills_result = score_skills(
             candidate_skills=candidate_structured.get("skills", []),
@@ -128,11 +129,13 @@ class RuleScoringService:
         )
 
         evidence = {
-            "skills": {
-                "matched": skills_result["matched"],
-                "missing": skills_result["missing"],
-                "candidate_skills_considered": candidate_structured.get("skills", []),
+                "skills": {
+                    "matched": skills_result["matched"],
+                    "missing": skills_result["missing"],
+                    "matched_preferred": skills_result.get("matched_preferred", []),
+                    "candidate_skills_considered": candidate_structured.get("skills", []),
             },
+                
             "experience": {
                 "candidate_years": candidate_structured.get("total_experience_years"),
                 "required_min": job_structured.get("minimum_experience_years"),

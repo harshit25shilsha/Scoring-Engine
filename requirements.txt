@@ -39,6 +39,6 @@ groq
 
 pgvector==0.3.6
 sentence-transformers==3.3.1
-redis==5.2.1
-pytest==8.3.4
-pytest-asyncio==0.25.2
+redis
+pytest
+pytest-asyncio

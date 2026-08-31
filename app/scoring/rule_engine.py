@@ -1,11 +1,10 @@
 import re
 from typing import Any
+from app.parsers.skill_parser import canonical_skill, normalize_skill
 
 
 def _normalize(text: Any) -> str:
-    if text is None:
-        return ""
-    return str(text).lower().strip()
+    return normalize_skill(canonical_skill(text))
 
 
 def _extract_alternatives(skill_phrase: str) -> list[str]:

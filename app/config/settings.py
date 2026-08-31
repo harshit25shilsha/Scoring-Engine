@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     GROQ_MODEL: str
     
     # API AUTH
-    SECRET_KEY: str
+    # SECRET_KEY: str
     
     # Redis
     REDIS_URL: str

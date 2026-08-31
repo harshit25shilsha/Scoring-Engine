@@ -12,7 +12,12 @@ from app.core.token_budget import get_remaining_budget,get_used_today,DAILY_TOKE
 router = APIRouter(tags=["scoring"])
 
 
-@router.post("/generate-score/{job_id}")
+
+@router.post(
+    "/generate-score/{job_id}",
+    summary="Generate rule score",
+    description="Backend/system endpoint. Requires a key with scope 'read_write'. This is not available to frontend 'read' keys.",
+)
 async def generate_score(
     job_id: int,
     db: AsyncSession = Depends(get_postgres_session),
@@ -20,7 +25,13 @@ async def generate_score(
     service = RuleScoringService(db)
     return await service.score_job_against_all_candidates(job_id)
 
-@router.post("/generate-semantic-score/{job_id}")
+
+
+@router.post(
+    "/generate-semantic-score/{job_id}",
+    summary="Generate semantic score",
+    description="Backend/system endpoint. Requires a key with scope 'read_write'.",
+)
 async def generate_semantic_score(
     job_id: int,
     db: AsyncSession = Depends(get_postgres_session),
@@ -29,7 +40,11 @@ async def generate_semantic_score(
     
     return await service.generate_semantic_scores_for_job(job_id)
 
-@router.post("/finalize-score/{job_id}")
+@router.post(
+    "/finalize-score/{job_id}",
+    summary="Finalize score",
+    description="Backend/system endpoint. Requires a key with scope 'read_write'.",
+)
 async def finalize_score(
     job_id: int,
     db: AsyncSession = Depends(get_postgres_session),
@@ -38,7 +53,12 @@ async def finalize_score(
     return await service.finalize_scores_for_job(job_id)
 
 
-@router.get("/jobs/{job_id}/candidates")
+
+@router.get(
+    "/jobs/{job_id}/candidates",
+    summary="Get ranked candidates",
+    description="Read access endpoint for candidate rankings. Requires a key with scope 'read' or 'read_write'.",
+)
 async def get_ranked_candidates(
     job_id: int,
     page: int = 1,
@@ -53,40 +73,13 @@ async def get_ranked_candidates(
         job_id, page, page_size, min_score, sort_by, sort_order
     )
     
-@router.post("/jobs/{job_id}/rescore")
-async def rescore_job_now(
-    job_id: int,
-    db: AsyncSession = Depends(get_postgres_session),
-):
-    acquired = await try_acquire_rescore_lock(job_id)
-    if not acquired:
-        raise HTTPException(
-            status_code= status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Job {job_id} was rescored recently. Please wait before retrying,",
-        )
-        
-    try:
-        rule_service = RuleScoringService(db)
-        semantic_service = SemanticScoringService(db)
-        final_service = FinalScoringService(db)
-        
-        rule_result = await rule_service.score_job_against_all_candidates(job_id)
-        semantic_result = await semantic_service.generate_semantic_scores_for_job(job_id)
-        final_result = await final_service.finalize_scores_for_job(job_id)
 
-        return {
-            "job_id": job_id,
-            "status": "completed",
-            "rule": rule_result,
-            "semantic": semantic_result,
-            "final": final_result,
-        }
-        
-    finally:
-        await release_rescore_lock(job_id)
-        
 
-@router.get("/groq-budget")
+@router.get(
+    "/groq-budget",
+    summary="Get Groq budget status",
+    description="Read access endpoint for token budget status. Requires a key with scope 'read' or 'read_write'.",
+)
 async def get_groq_budget_status():
     used = get_used_today()
     remaining = get_remaining_budget()

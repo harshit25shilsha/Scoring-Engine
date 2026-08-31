@@ -47,8 +47,7 @@ class AutoScoringService:
         """)
         result = await self.db.execute(query, {"limit": limit})
         return [row[0] for row in result.all()]
-    
-    
+
     async def run_scoring_cycle(self) -> dict:
         if not has_sufficient_budget():
             remaining = get_remaining_budget()
@@ -59,15 +58,10 @@ class AutoScoringService:
             return {"jobs_processed": 0, "details": [], "status": "skipped_budget_exhausted"}
 
         job_ids = await self.find_jobs_needing_scoring(settings.MAX_JOBS_PER_SCORING_CYCLE)
-        
-
-
-    async def run_scoring_cycle(self) -> dict:
-        job_ids = await self.find_jobs_needing_scoring(settings.MAX_JOBS_PER_SCORING_CYCLE)
 
         if not job_ids:
             logger.info("[auto-score] no jobs pending scoring this cycle")
-            return {"jobs_processed": 0, "details": []}
+            return {"jobs_processed": 0, "details": [], "status": "completed"}
 
         logger.info(f"[auto-score] cycle processing jobs (fewest remaining first): {job_ids}")
 
@@ -91,4 +85,4 @@ class AutoScoringService:
                 logger.error(f"[auto-score] job={job_id} scoring cycle failed: {e}")
                 details.append({"job_id": job_id, "error": str(e)})
 
-        return {"jobs_processed": len(job_ids), "details": details}
+        return {"jobs_processed": len(job_ids), "details": details, "status": "completed"}

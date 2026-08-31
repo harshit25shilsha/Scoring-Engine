@@ -11,7 +11,12 @@ from app.schemas.candidate import CandidateResponse
 router = APIRouter(prefix="/candidate", tags=["candidates"])
 
 
-@router.get("/{candidate_id}", response_model=CandidateResponse)
+@router.get(
+    "/{candidate_id}",
+    response_model=CandidateResponse,
+    summary="Get candidate by id",
+    description="Frontend or backend read access endpoint. Requires a key with scope 'read' or 'read_write'.",
+)
 async def get_candidate(
     candidate_id: int,
     db: AsyncSession = Depends(get_postgres_session),
@@ -22,7 +27,11 @@ async def get_candidate(
     return candidate
 
 
-@router.get("/{candidate_id}/scores")
+@router.get(
+    "/{candidate_id}/scores",
+    summary="Get candidate score history",
+    description="Read access endpoint for candidate score results. Requires a key with scope 'read' or 'read_write'.",
+)
 async def get_candidate_scores(
     candidate_id: int,
     db: AsyncSession = Depends(get_postgres_session),

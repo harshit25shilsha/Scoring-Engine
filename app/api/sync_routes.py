@@ -12,19 +12,34 @@ job_sync_service = JobSyncService()
 
 # Initial Migration (one-time, internal/admin)
 
-@router.post("/initial/candidates", response_model=SyncResult)
+@router.post(
+    "/initial/candidates",
+    response_model=SyncResult,
+    summary="Initial candidate sync",
+    description="Backend/system operation. Requires a key with scope 'read_write'.",
+)
 async def sync_initial_candidates():
     count = await candidate_sync_service.run_initial_migration()
     return SyncResult(entity="candidate", mode="initial", synced_count=count)
 
 
-@router.post("/initial/jobs", response_model=SyncResult)
+@router.post(
+    "/initial/jobs",
+    response_model=SyncResult,
+    summary="Initial job sync",
+    description="Backend/system operation. Requires a key with scope 'read_write'.",
+)
 async def sync_initial_jobs():
     count = await job_sync_service.run_initial_migration()
     return SyncResult(entity="job", mode="initial", synced_count=count)
 
 
-@router.post("/initial/all", response_model=list[SyncResult])
+@router.post(
+    "/initial/all",
+    response_model=list[SyncResult],
+    summary="Initial full sync",
+    description="Backend/system operation. Requires a key with scope 'read_write'.",
+)
 async def sync_initial_all():
     candidate_count = await candidate_sync_service.run_initial_migration()
     job_count = await job_sync_service.run_initial_migration()
@@ -36,19 +51,34 @@ async def sync_initial_all():
 
 # Incremental Sync (manual trigger; scheduler calls same services)
 
-@router.post("/incremental/candidates", response_model=SyncResult)
+@router.post(
+    "/incremental/candidates",
+    response_model=SyncResult,
+    summary="Incremental candidate sync",
+    description="Backend/system operation. Requires a key with scope 'read_write'.",
+)
 async def sync_incremental_candidates():
     count = await candidate_sync_service.run_incremental_sync()
     return SyncResult(entity="candidate", mode="incremental", synced_count=count)
 
 
-@router.post("/incremental/jobs", response_model=SyncResult)
+@router.post(
+    "/incremental/jobs",
+    response_model=SyncResult,
+    summary="Incremental job sync",
+    description="Backend/system operation. Requires a key with scope 'read_write'.",
+)
 async def sync_incremental_jobs():
     count = await job_sync_service.run_incremental_sync()
     return SyncResult(entity="job", mode="incremental", synced_count=count)
 
 
-@router.post("/incremental/all", response_model=list[SyncResult])
+@router.post(
+    "/incremental/all",
+    response_model=list[SyncResult],
+    summary="Incremental full sync",
+    description="Backend/system operation. Requires a key with scope 'read_write'.",
+)
 async def sync_incremental_all():
     candidate_count = await candidate_sync_service.run_incremental_sync()
     job_count = await job_sync_service.run_incremental_sync()

@@ -4,8 +4,9 @@ from .sync_metadata import SyncMetadata
 from .resume_processed import ResumeProcessed
 from .job_processed import JobProcessed
 from .candidate_job_score import CandidateJobScore
-
+from .api_key import ApiKey
 __all__ = [
     "CandidateRaw", "JobRaw", "SyncMetadata",
     "ResumeProcessed", "JobProcessed", "CandidateJobScore",
+    "ApiKey",
 ]

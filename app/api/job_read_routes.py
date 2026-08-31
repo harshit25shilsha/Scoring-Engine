@@ -8,7 +8,12 @@ from app.schemas.job import JobResponse
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get(
+    "/{job_id}",
+    response_model=JobResponse,
+    summary="Get job by id",
+    description="Frontend read access endpoint. Requires a key with scope 'read' or 'read_write'.",
+)
 async def get_job(
     job_id: int,
     db: AsyncSession = Depends(get_postgres_session),

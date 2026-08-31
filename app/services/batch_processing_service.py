@@ -182,3 +182,48 @@ class BatchProcessingService:
         }
         logger.info(f"[batch] job backfill complete — {summary}")
         return summary
+    
+    
+    async def retry_failed_job_structuring(self) -> dict:
+        """
+        Re-attempts Groq structuring + embedding for jobs stuck at PARSED_ONLY,
+        without re-fetching or re-cleaning the JD text (already correct, unchanged).
+        """
+        from sqlalchemy import select as sa_select
+        from app.database.models import JobProcessed
+        import json as _json
+
+        result = await self.db.execute(
+            sa_select(JobProcessed).where(JobProcessed.parse_status == "PARSED_ONLY")
+        )
+        pending = result.scalars().all()
+
+        logger.info(f"[retry] job structuring retry starting — {len(pending)} pending")
+
+        succeeded, failed = 0, 0
+
+        for row in pending:
+            try:
+                structured = self.job_service.extractor.extract(row.cleaned_jd)
+                embedding_vector = self.job_service.embedder.generate(row.cleaned_jd)
+
+                row.structured_json = _json.dumps(structured)
+                row.embedding = embedding_vector
+                row.parse_status = "STRUCTURED"
+                row.parse_error = None
+                await self.db.commit()
+
+                await self.job_service._mark_job_processed(row.job_id, True)
+                succeeded += 1
+                logger.info(f"[retry] job={row.job_id} structured successfully")
+
+            except Exception as e:
+                await self.db.rollback()
+                failed += 1
+                logger.error(f"[retry] job={row.job_id} still failing: {e}")
+
+            await asyncio.sleep(settings.GROQ_BATCH_DELAY_SECONDS)
+
+        summary = {"total_pending": len(pending), "succeeded": succeeded, "failed": failed}
+        logger.info(f"[retry] job structuring retry complete — {summary}")
+        return summary
